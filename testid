@@ -4,7 +4,9 @@ import base64, hashlib, hmac, os, pickle, time, urllib
 from lxml import etree
 from random import random
 from twisted.internet import reactor, tcp
-from twisted.web import http
+from twisted.web import resource, server
+
+root = resource.Resource()
 
 def rndstr(length, alphabet):
   result = ''
@@ -27,126 +29,124 @@ segment = rndstr(6, '!$&\'()*+,-.' + ''.join(map(chr, range(48, 58))) + ':;=@' +
 
 shared = {}
 
-class factory(http.HTTPFactory):
-  class protocol(http.HTTPChannel):
-    class requestFactory(http.Request):
-      def requestReceived(ctx, method, target, version):
-        ctx.client = ctx.channel.transport.getPeer()
-        ctx.clientproto = version
+class smokeTest(resource.Resource):
+  def render(ctx, request):
+    host, = request.requestHeaders.getRawHeaders('Host')
 
-        host, = ctx.requestHeaders.getRawHeaders('Host')
+    request.setHeader('Content-Type', 'application/xrds+xml')
 
-        if target == '/':
-          ctx.setHeader('Content-Type', 'application/xrds+xml')
+    return ''.join((
+      '<XRDS xmlns="xri://$xrds">',
+        '<XRD xmlns="xri://$xrd*($v*2.0)">',
+          '<Service>',
+            '<Type>http://specs.openid.net/auth/2.0/signon</Type>',
+            '<URI>http://{}/smokeTest/{}</URI>'.format(host, segment),
+          '</Service>',
+        '</XRD>',
+      '</XRDS>'))
 
-          ctx.write(''.join((
-            '<XRDS xmlns="xri://$xrds">',
-              '<XRD xmlns="xri://$xrd*($v*2.0)">',
-                '<Service>',
-                  '<Type>http://specs.openid.net/auth/2.0/signon</Type>',
-                  '<URI>http://{}/{}</URI>'.format(host, segment),
-                '</Service>',
-              '</XRD>',
-            '</XRDS>')))
+child = smokeTest()
+root.putChild('smokeTest', child)
 
-        else:
-          if method == 'POST':
-            ctx.content.seek(0)
-            params = urlencoded(ctx.content.read())
+class opEndpoint(resource.Resource):
+  def render(ctx, request):
+    host, = request.requestHeaders.getRawHeaders('Host')
 
-          else:
-            _, query = target.split('?', 1)
-            params = urlencoded(query)
+    if request.method == 'POST':
+      request.content.seek(0)
+      params = urlencoded(request.content.read())
 
-          if str(params['openid.mode']) == 'associate':
+    else:
+      _, query = request.uri.split('?', 1)
+      params = urlencoded(query)
 
-            # ASCII characters in the range 33-126 inclusive (printable
-            # non-whitespace characters)
-            assocHandle = rndstr(6, map(chr, range(33, 126 + 1)))
+    if str(params['openid.mode']) == 'associate':
 
-            try:
-              g = base64Dec(params['openid.dh_gen'])
+      # ASCII characters in the range 33-126 inclusive (printable
+      # non-whitespace characters)
+      assocHandle = rndstr(6, map(chr, range(33, 126 + 1)))
 
-            except KeyError:
-              g = 2
+      try:
+        g = base64Dec(params['openid.dh_gen'])
 
-            try:
-              p = base64Dec(params['openid.dh_modulus'])
+      except KeyError:
+        g = 2
 
-            except KeyError:
+      try:
+        p = base64Dec(params['openid.dh_modulus'])
 
-              # This is a confirmed-prime number, used as the default modulus
-              # for Diffie-Hellman Key Exchange
-              p = 0xdcf93a0b883972ec0e19989ac5a2ce310e1d37717e8d9571bb7623731866e61ef75a2e27898b057f9891c2e27a639c3f29b60814581cd3b2ca3986d2683705577d45c2e7e52dc81c7a171876e5cea74b1448bfdfaf18828efd2519f14e45e3826634af1949e5b535cc829a483b8a76223e5d490a257f05bdff16f2fb22c583ab
+      except KeyError:
 
-            # Random private key xb in the range [1 .. p-1]
-            xb = int(random() * p)
+        # This is a confirmed-prime number, used as the default modulus
+        # for Diffie-Hellman Key Exchange
+        p = 0xdcf93a0b883972ec0e19989ac5a2ce310e1d37717e8d9571bb7623731866e61ef75a2e27898b057f9891c2e27a639c3f29b60814581cd3b2ca3986d2683705577d45c2e7e52dc81c7a171876e5cea74b1448bfdfaf18828efd2519f14e45e3826634af1949e5b535cc829a483b8a76223e5d490a257f05bdff16f2fb22c583ab
 
-            dhServerPublic = base64Enc(pow(g, xb, p))
+      # Random private key xb in the range [1 .. p-1]
+      xb = int(random() * p)
 
-            # The MAC key MUST be the same length as the output of H, the hash
-            # function - 160 bits (20 bytes) for DH-SHA1 or 256 bits (32 bytes)
-            # for DH-SHA256, as well as the output of the signature algorithm
-            # of this association
+      dhServerPublic = base64Enc(pow(g, xb, p))
 
-            if str(params['openid.session_type']) == 'DH-SHA1':
-              H = hashlib.sha1()
+      # The MAC key MUST be the same length as the output of H, the hash
+      # function - 160 bits (20 bytes) for DH-SHA1 or 256 bits (32 bytes)
+      # for DH-SHA256, as well as the output of the signature algorithm
+      # of this association
 
-              if str(params['openid.assoc_type']) == 'HMAC-SHA1':
-                key = os.urandom(20)
+      if str(params['openid.session_type']) == 'DH-SHA1':
+        H = hashlib.sha1()
 
-                shared[assocHandle] = key, hashlib.sha1
+        if str(params['openid.assoc_type']) == 'HMAC-SHA1':
+          key = os.urandom(20)
+          shared[assocHandle] = key, hashlib.sha1
 
-            elif str(params['openid.session_type']) == 'DH-SHA256':
-              H = hashlib.sha256()
+      elif str(params['openid.session_type']) == 'DH-SHA256':
+        H = hashlib.sha256()
 
-              if str(params['openid.assoc_type']) == 'HMAC-SHA256':
-                key = os.urandom(32)
+        if str(params['openid.assoc_type']) == 'HMAC-SHA256':
+          key = os.urandom(32)
+          shared[assocHandle] = key, hashlib.sha256
 
-                shared[assocHandle] = key, hashlib.sha256
+      H.update(btwocEnc(pow(base64Dec(params['openid.dh_consumer_public']), xb, p)))
+      encMacKey = base64.b64encode(''.join(chr(ord(digest) ^ ord(key)) for digest, key in zip(H.digest(), key)))
 
-            H.update(btwocEnc(pow(base64Dec(params['openid.dh_consumer_public']), xb, p)))
-            encMacKey = base64.b64encode(''.join(chr(ord(digest) ^ ord(key)) for digest, key in zip(H.digest(), key)))
+      # 14 days in seconds
+      expiresIn = 14 * 24 * 60 * 60
 
-            # 14 days in seconds
-            expiresIn = 14 * 24 * 60 * 60
+      return '\n'.join(map(':'.join, (
+        ('assoc_handle', assocHandle),
+        ('assoc_type', str(params['openid.assoc_type'])),
+        ('dh_server_public', dhServerPublic),
+        ('enc_mac_key', encMacKey),
+        ('expires_in', str(expiresIn)),
+        ('ns', 'http://specs.openid.net/auth/2.0'),
+        ('session_type', str(params['openid.session_type']))))) + '\n'
 
-            ctx.write('\n'.join(map(':'.join, (
-              ('assoc_handle', assocHandle),
-              ('assoc_type', str(params['openid.assoc_type'])),
-              ('dh_server_public', dhServerPublic),
-              ('enc_mac_key', encMacKey),
-              ('expires_in', str(expiresIn)),
-              ('ns', 'http://specs.openid.net/auth/2.0'),
-              ('session_type', str(params['openid.session_type']))))) + '\n')
+    elif str(params['openid.mode']) == 'checkid_setup':
+      assocHandle = str(params['openid.assoc_handle'])
+      returnTo = str(params['openid.return_to'])
 
-          elif str(params['openid.mode']) == 'checkid_setup':
-            assocHandle = str(params['openid.assoc_handle'])
-            returnTo = str(params['openid.return_to'])
+      signed = [
+        ('assoc_handle', assocHandle),
+        ('claimed_id', str(params['openid.claimed_id'])),
+        ('identity', str(params['openid.identity'])),
+        ('op_endpoint', 'http://{}/smokeTest/{}'.format(host, segment)),
+        ('response_nonce', time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())),
+        ('return_to', returnTo)]
 
-            signed = [
-              ('assoc_handle', assocHandle),
-              ('claimed_id', str(params['openid.claimed_id'])),
-              ('identity', str(params['openid.identity'])),
-              ('op_endpoint', 'http://{}/{}'.format(host, segment)),
-              ('response_nonce', time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())),
-              ('return_to', returnTo)]
+      key, digestmod = shared[assocHandle]
 
-            key, digestmod = shared[assocHandle]
+      signed.extend((
+        ('mode', 'id_res'),
+        ('ns', 'http://specs.openid.net/auth/2.0'),
+        ('sig', base64.b64encode(hmac.new(key, '\n'.join(map(':'.join, signed)) + '\n', digestmod).digest())),
+        ('signed', ','.join(field for field, _ in signed))))
 
-            signed.extend((
-              ('mode', 'id_res'),
-              ('ns', 'http://specs.openid.net/auth/2.0'),
-              ('sig', base64.b64encode(hmac.new(key, '\n'.join(map(':'.join, signed)) + '\n', digestmod).digest())),
-              ('signed', ','.join(field for field, _ in signed))))
+      form = etree.Element('form', action=returnTo, method='post')
+      for k, v in signed:
+        form.append(etree.Element('input', name='openid.' + k, value=v))
 
-            form = etree.Element('form', action=returnTo, method='post')
-            for k, v in signed:
-              form.append(etree.Element('input', name='openid.' + k, value=v))
+      return etree.tostring(form) + '<script>document.forms[0].submit()</script>'
 
-            ctx.write(etree.tostring(form) + '<script>document.forms[0].submit()</script>')
-
-        return ctx.finish()
+child.putChild(segment, opEndpoint())
 
 btwocDec = lambda arg: pickle.decode_long(arg[::-1])
 btwocEnc = lambda arg: pickle.encode_long(arg)[::-1] if arg else '\x00'
@@ -222,6 +222,6 @@ class manyMap:
 
 urlencoded = lambda arg: manyMap(*(map(urllib.unquote_plus, pair.split('=', 1)) for pair in arg.split('&')))
 
-tcp.Port(2269, factory()).startListening()
+tcp.Port(2269, server.Site(root)).startListening()
 
 reactor.run()
