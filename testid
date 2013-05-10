@@ -27,9 +27,18 @@ def rndstr(length, alphabet):
 #               / "*" / "+" / "," / ";" / "="
 segment = rndstr(6, '!$&\'()*+,-.' + ''.join(map(chr, range(48, 58))) + ':;=@' + ''.join(map(chr, range(65, 91))) + '_' + ''.join(map(chr, range(97, 123))) + '~')
 
-class xrds(resource.Resource):
+class claimedIdentifier(resource.Resource):
   def render(ctx, request):
     host, = request.requestHeaders.getRawHeaders('Host')
+
+    try:
+      end = request.path.index('/', 1)
+
+    except ValueError:
+      base = request.path
+
+    else:
+      base = request.path[:end]
 
     request.setHeader('Content-Type', 'application/xrds+xml')
 
@@ -38,7 +47,7 @@ class xrds(resource.Resource):
         '<XRD xmlns="xri://$xrd*($v*2.0)">',
           '<Service>',
             '<Type>http://specs.openid.net/auth/2.0/signon</Type>',
-            '<URI>http://{}{}/{}</URI>'.format(host, request.path, segment),
+            '<URI>http://{}{}/{}</URI>'.format(host, base, segment),
           '</Service>',
         '</XRD>',
       '</XRDS>'))
@@ -156,14 +165,14 @@ class opEndpoint(resource.Resource):
     elif mode == 'check_authentication':
       return ctx.checkAuthentication(request, params)
 
-child = xrds()
+child = claimedIdentifier()
 child.putChild(segment, opEndpoint())
 root.putChild('smokeTest', child)
 
 # If the Relying Party does not have an association stored, it MUST request
 # that the OP verify the signature via Direct Verification
 
-class directVerification(opEndpoint):
+class directVerificationOpEndpoint(opEndpoint):
   def checkidSetup(ctx, request, params):
     host, = request.requestHeaders.getRawHeaders('Host')
 
@@ -196,9 +205,82 @@ class directVerification(opEndpoint):
 
     return etree.tostring(form) + '<script>document.forms[0].submit()</script>'
 
-child = xrds()
-child.putChild(segment, directVerification())
+child = claimedIdentifier()
+child.putChild(segment, directVerificationOpEndpoint())
 root.putChild('directVerification', child)
+
+# For the purposes of making OpenID Authentication requests, the value
+# "http://specs.openid.net/auth/2.0/identifier_select" MUST be used as both the
+# Claimed Identifier and the OP-Local Identifier when an OP Identifier is
+# entered
+
+class opIdentifier(resource.Resource):
+  def render(ctx, request):
+    host, = request.requestHeaders.getRawHeaders('Host')
+
+    try:
+      end = request.path.index('/', 1)
+
+    except ValueError:
+      base = request.path
+
+    else:
+      base = request.path[:end]
+
+    request.setHeader('Content-Type', 'application/xrds+xml')
+
+    return ''.join((
+      '<XRDS xmlns="xri://$xrds">',
+        '<XRD xmlns="xri://$xrd*($v*2.0)">',
+          '<Service>',
+            '<Type>http://specs.openid.net/auth/2.0/server</Type>',
+            '<URI>http://{}{}/{}</URI>'.format(host, base, segment),
+          '</Service>',
+        '</XRD>',
+      '</XRDS>'))
+
+class identifierSelectOpEndpoint(opEndpoint):
+  def checkidSetup(ctx, request, params):
+    host, = request.requestHeaders.getRawHeaders('Host')
+
+    try:
+      end = request.path.index('/', 1)
+
+    except ValueError:
+      base = request.path
+
+    else:
+      base = request.path[:end]
+
+    assocHandle = str(params['openid.assoc_handle'])
+    returnTo = str(params['openid.return_to'])
+
+    signed = [
+      ('assoc_handle', assocHandle),
+      ('claimed_id', 'http://{}{}/claimedIdentifier'.format(host, base)),
+      ('identity', 'http://{}{}/claimedIdentifier'.format(host, base)),
+      ('op_endpoint', 'http://{}{}'.format(host, request.path)),
+      ('response_nonce', time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())),
+      ('return_to', returnTo)]
+
+    key, digestmod = ctx.shared[assocHandle]
+
+    signed.extend((
+      ('mode', 'id_res'),
+      ('ns', 'http://specs.openid.net/auth/2.0'),
+      ('sig', base64.b64encode(hmac.new(key, '\n'.join(map(':'.join, signed)) + '\n', digestmod).digest())),
+      ('signed', ','.join(field for field, _ in signed))))
+
+    form = etree.Element('form', action=returnTo, method='post')
+    for k, v in signed:
+      form.append(etree.Element('input', name='openid.' + k, value=v))
+
+    return etree.tostring(form) + '<script>document.forms[0].submit()</script>'
+
+child = opIdentifier()
+child.putChild(segment, identifierSelectOpEndpoint())
+child.putChild('claimedIdentifier', claimedIdentifier())
+root.putChild('identifierSelect', child)
 
 btwocDec = lambda arg: pickle.decode_long(arg[::-1])
 btwocEnc = lambda arg: pickle.encode_long(arg)[::-1] if arg else '\x00'
