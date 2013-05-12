@@ -316,6 +316,79 @@ child = attributeExchangeClaimedIdentifier()
 child.putChild(segment, opEndpoint())
 root.putChild('attributeExchange', child)
 
+class attributeExchangeOpIdentifier(resource.Resource):
+  def render(ctx, request):
+    host, = request.requestHeaders.getRawHeaders('Host')
+
+    try:
+      end = request.path.index('/', 1)
+
+    except ValueError:
+      base = request.path
+
+    else:
+      base = request.path[:end]
+
+    request.setHeader('Content-Type', 'application/xrds+xml')
+
+    return ''.join((
+      '<XRDS xmlns="xri://$xrds">',
+        '<XRD xmlns="xri://$xrd*($v*2.0)">',
+          '<Service>',
+            '<Type>http://specs.openid.net/auth/2.0/server</Type>',
+            '<Type>http://openid.net/srv/ax/1.0</Type>',
+            '<URI>http://{}{}/{}</URI>'.format(host, base, segment),
+          '</Service>',
+        '</XRD>',
+      '</XRDS>'))
+
+class bigBangOpEndpoint(opEndpoint):
+  def checkidSetup(ctx, request, params):
+    host, = request.requestHeaders.getRawHeaders('Host')
+
+    try:
+      end = request.path.index('/', 1)
+
+    except ValueError:
+      base = request.path
+
+    else:
+      base = request.path[:end]
+
+    # ASCII characters in the range 33-126 inclusive (printable non-whitespace
+    # characters)
+    assocHandle = rndstr(6, map(chr, range(33, 126 + 1)))
+
+    returnTo = str(params['openid.return_to'])
+
+    signed = [
+      ('assoc_handle', assocHandle),
+      ('claimed_id', 'http://{}{}/claimedIdentifier'.format(host, base)),
+      ('identity', 'http://{}{}/claimedIdentifier'.format(host, base)),
+      ('op_endpoint', 'http://{}{}'.format(host, request.path)),
+      ('response_nonce', time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())),
+      ('return_to', returnTo)]
+
+    key = os.urandom(32)
+    digestmod = hashlib.sha256
+
+    signed.extend((
+      ('mode', 'id_res'),
+      ('ns', 'http://specs.openid.net/auth/2.0'),
+      ('sig', base64.b64encode(hmac.new(key, '\n'.join(map(':'.join, signed)) + '\n', digestmod).digest())),
+      ('signed', ','.join(field for field, _ in signed))))
+
+    form = etree.Element('form', action=returnTo, method='post')
+    for k, v in signed:
+      form.append(etree.Element('input', name='openid.' + k, value=v))
+
+    return etree.tostring(form) + '<script>document.forms[0].submit()</script>'
+
+child = attributeExchangeOpIdentifier()
+child.putChild(segment, bigBangOpEndpoint())
+child.putChild('claimedIdentifier', attributeExchangeClaimedIdentifier())
+root.putChild('bigBang', child)
+
 btwocDec = lambda arg: pickle.decode_long(arg[::-1])
 btwocEnc = lambda arg: pickle.encode_long(arg)[::-1] if arg else '\x00'
 
