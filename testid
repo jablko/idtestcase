@@ -282,6 +282,40 @@ child.putChild(segment, identifierSelectOpEndpoint())
 child.putChild('claimedIdentifier', claimedIdentifier())
 root.putChild('identifierSelect', child)
 
+# The attribute exchange namespace "http://openid.net/srv/ax/1.0" SHOULD be
+# listed as an <xrd:Type> child element of the <xrd:Service> element in the
+# XRDS discovery document
+
+class attributeExchangeClaimedIdentifier(resource.Resource):
+  def render(ctx, request):
+    host, = request.requestHeaders.getRawHeaders('Host')
+
+    try:
+      end = request.path.index('/', 1)
+
+    except ValueError:
+      base = request.path
+
+    else:
+      base = request.path[:end]
+
+    request.setHeader('Content-Type', 'application/xrds+xml')
+
+    return ''.join((
+      '<XRDS xmlns="xri://$xrds">',
+        '<XRD xmlns="xri://$xrd*($v*2.0)">',
+          '<Service>',
+            '<Type>http://specs.openid.net/auth/2.0/signon</Type>',
+            '<Type>http://openid.net/srv/ax/1.0</Type>',
+            '<URI>http://{}{}/{}</URI>'.format(host, base, segment),
+          '</Service>',
+        '</XRD>',
+      '</XRDS>'))
+
+child = attributeExchangeClaimedIdentifier()
+child.putChild(segment, opEndpoint())
+root.putChild('attributeExchange', child)
+
 btwocDec = lambda arg: pickle.decode_long(arg[::-1])
 btwocEnc = lambda arg: pickle.encode_long(arg)[::-1] if arg else '\x00'
 
