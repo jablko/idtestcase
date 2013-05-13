@@ -389,6 +389,45 @@ child.putChild(segment, bigBangOpEndpoint())
 child.putChild('claimedIdentifier', attributeExchangeClaimedIdentifier())
 root.putChild('bigBang', child)
 
+# An Identity Provider MAY return any subset of the following fields in
+# response to the query
+
+class simpleRegistrationOpEndpoint(opEndpoint):
+  def checkidSetup(ctx, request, params):
+    host, = request.requestHeaders.getRawHeaders('Host')
+
+    assocHandle = str(params['openid.assoc_handle'])
+    returnTo = str(params['openid.return_to'])
+
+    signed = [
+      ('assoc_handle', assocHandle),
+      ('claimed_id', str(params['openid.claimed_id'])),
+      ('identity', str(params['openid.identity'])),
+      ('op_endpoint', 'http://{}{}'.format(host, request.path)),
+      ('response_nonce', time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())),
+      ('return_to', returnTo),
+      ('sreg.email', 'nickname@example.com'),
+      ('sreg.fullname', 'John Doe'),
+      ('sreg.nickname', 'nickname')]
+
+    key, digestmod = ctx.shared[assocHandle]
+
+    signed.extend((
+      ('mode', 'id_res'),
+      ('ns', 'http://specs.openid.net/auth/2.0'),
+      ('sig', base64.b64encode(hmac.new(key, '\n'.join(map(':'.join, signed)) + '\n', digestmod).digest())),
+      ('signed', ','.join(field for field, _ in signed))))
+
+    form = etree.Element('form', action=returnTo, method='post')
+    for k, v in signed:
+      form.append(etree.Element('input', name='openid.' + k, value=v))
+
+    return etree.tostring(form) + '<script>document.forms[0].submit()</script>'
+
+child = claimedIdentifier()
+child.putChild(segment, simpleRegistrationOpEndpoint())
+root.putChild('simpleRegistration', child)
+
 btwocDec = lambda arg: pickle.decode_long(arg[::-1])
 btwocEnc = lambda arg: pickle.encode_long(arg)[::-1] if arg else '\x00'
 
