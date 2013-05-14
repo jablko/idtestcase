@@ -1,4 +1,4 @@
-from testid import *
+from idtestcase import *
 
 # The attribute exchange namespace "http://openid.net/srv/ax/1.0" SHOULD be
 # listed as an <xrd:Type> child element of the <xrd:Service> element in the

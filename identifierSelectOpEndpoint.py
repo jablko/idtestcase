@@ -1,6 +1,6 @@
 import hashlib, hmac, opEndpoint, time
 from lxml import etree
-from testid import *
+from idtestcase import *
 
 class application:
   class __metaclass__(opEndpoint.application.__metaclass__):

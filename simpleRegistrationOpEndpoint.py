@@ -1,6 +1,6 @@
 import hashlib, hmac, opEndpoint, time
 from lxml import etree
-from testid import *
+from idtestcase import *
 
 # An Identity Provider MAY return any subset of the following fields in
 # response to the query

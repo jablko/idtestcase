@@ -1,6 +1,6 @@
 import hashlib, hmac, os, time
 from lxml import etree
-from testid import *
+from idtestcase import *
 
 class application:
   class __metaclass__(type):

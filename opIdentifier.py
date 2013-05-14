@@ -1,4 +1,4 @@
-from testid import *
+from idtestcase import *
 
 def application(environ, start_response):
   host = environ['HTTP_HOST']

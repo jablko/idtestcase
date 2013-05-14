@@ -1,6 +1,6 @@
 import hashlib, hmac, opEndpoint, os, time
 from lxml import etree
-from testid import *
+from idtestcase import *
 
 # If the Relying Party does not have an association stored, it MUST request
 # that the OP verify the signature via Direct Verification
