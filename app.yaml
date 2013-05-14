@@ -1,0 +1,52 @@
+api_version: 1
+application: idtestcase
+runtime: python27
+threadsafe: false
+version: 1
+
+handlers:
+- url: /smokeTest
+  script: claimedIdentifier.application
+
+- url: /smokeTest/1
+  script: opEndpoint.application
+
+- url: /directVerification
+  script: claimedIdentifier.application
+
+- url: /directVerification/1
+  script: directVerificationOpEndpoint.application
+
+- url: /identifierSelect
+  script: opIdentifier.application
+
+- url: /identifierSelect/1
+  script: identifierSelectOpEndpoint.application
+
+- url: /identifierSelect/claimedIdentifier
+  script: claimedIdentifier.application
+
+- url: /attributeExchange
+  script: attributeExchangeClaimedIdentifier.application
+
+- url: /attributeExchange/1
+  script: opEndpoint.application
+
+- url: /bigBang
+  script: attributeExchangeOpIdentifier.application
+
+- url: /bigBang/1
+  script: bigBangOpEndpoint.application
+
+- url: /bigBang/claimedIdentifier
+  script: attributeExchangeClaimedIdentifier.application
+
+- url: /simpleRegistration
+  script: claimedIdentifier.application
+
+- url: /simpleRegistration/1
+  script: simpleRegistrationOpEndpoint.application
+
+libraries:
+- name: lxml
+  version: latest
